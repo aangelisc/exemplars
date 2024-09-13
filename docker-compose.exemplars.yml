@@ -1,0 +1,17 @@
+services:
+  exemplars:
+    image: golang:latest
+    container_name: exemplars
+    working_dir: /home/go/app
+    volumes:
+      - ./exemplars:/home/go/app
+    command: "go run main.go"
+    ports:
+      - 8081:8081
+    environment:
+      - HOST=grafana-gateway
+      - PORT=3100
+    networks:
+      grafana:
+    depends_on:
+      - gateway
