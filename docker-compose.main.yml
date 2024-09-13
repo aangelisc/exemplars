@@ -1,0 +1,152 @@
+---
+networks:
+  grafana:
+
+services:
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    environment:
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+      - GF_FEATURE_TOGGLES_ENABLE=traceqlEditor,azureMonitorPrometheusExemplars
+      - TENANT_ID=${TENANT_ID}
+      - CLIENT_ID=${CLIENT_ID}
+      - CLIENT_SECRET=${CLIENT_SECRET}
+    depends_on:
+      - gateway
+    ports:
+      - "3002:3000"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - ./datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml
+    networks:
+      grafana:
+
+  gateway:
+    image: nginx:latest
+    container_name: grafana-gateway
+    depends_on:
+      - loki-read
+      - loki-write
+    entrypoint:
+      - sh
+      - -euc
+      - |
+        cat <<EOF > /etc/nginx/nginx.conf
+        user  nginx;
+        worker_processes  5;  ## Default: 1
+
+        events {
+          worker_connections   1000;
+        }
+
+        http {
+          resolver 127.0.0.11;
+
+          server {
+            listen             3100;
+
+            location = / {
+              return 200 'OK';
+              auth_basic off;
+            }
+
+            location = /api/prom/push {
+              proxy_pass       http://loki-write:3100\$$request_uri;
+            }
+
+            location = /api/prom/tail {
+              proxy_pass       http://loki-read:3100\$$request_uri;
+              proxy_set_header Upgrade \$$http_upgrade;
+              proxy_set_header Connection "upgrade";
+            }
+
+            location ~ /api/prom/.* {
+              proxy_pass       http://loki-read:3100\$$request_uri;
+            }
+
+            location = /loki/api/v1/push {
+              proxy_pass       http://loki-write:3100\$$request_uri;
+            }
+
+            location = /loki/api/v1/tail {
+              proxy_pass       http://loki-read:3100\$$request_uri;
+              proxy_set_header Upgrade \$$http_upgrade;
+              proxy_set_header Connection "upgrade";
+            }
+
+            location ~ /loki/api/.* {
+              proxy_pass       http://loki-read:3100\$$request_uri;
+            }
+          }
+        }
+        EOF
+        /docker-entrypoint.sh nginx -g "daemon off;"
+    ports:
+      - "3100:3100"
+    healthcheck:
+      test: ["CMD", "service", "nginx", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      grafana:
+      loki:
+
+  agent:
+    image: grafana/agent:v0.27.1
+    container_name: grafana-agent
+    volumes:
+      - ./grafana-agent.yaml:/etc/agent.yaml
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    entrypoint:
+      - /bin/agent
+      - -config.file=/etc/agent.yaml
+    networks:
+      grafana:
+      tempo:
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    command:
+      - --config.file=/etc/prometheus.yaml
+      - --web.enable-remote-write-receiver
+      - --enable-feature=exemplar-storage
+    volumes:
+      - ./prometheus.yaml:/etc/prometheus.yaml
+    ports:
+      - "9090:9090"
+    networks:
+      grafana:
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib
+    command: [--config=/etc/otel-collector-config.yaml]
+    container_name: otel-collector
+    volumes:
+      - ./otel-config.yaml:/etc/otel-collector-config.yaml
+    environment:
+      - APPLICATIONINSIGHTS_CONNECTION_STRING=${APPLICATIONINSIGHTS_CONNECTION_STRING}
+    ports:
+      - 1888 # pprof extension
+      - 8888 # Prometheus metrics exposed by the collector
+      - 8889 # Prometheus exporter metrics
+      - 13133 # health_check extension
+      - 4317 # OTLP gRPC receiver
+      - 4318 # OTLP http receiver
+      - 55679 # zpages extension
+    networks:
+      tempo:
+      grafana:

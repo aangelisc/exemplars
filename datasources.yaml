@@ -1,0 +1,65 @@
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    orgId: 1
+    url: http://prometheus:9090
+    basicAuth: false
+    isDefault: true
+    version: 1
+    editable: true
+    jsonData:
+      httpMethod: POST
+      exemplarTraceIdDestinations:
+        - datasourceUid: Azure
+          name: traceID
+          urlDisplayLabel: View Trace in Azure
+  - name: Azure
+    type: grafana-azure-monitor-datasource
+    uid: azure
+    access: proxy
+    orgId: 1
+    version: 1
+    editable: true
+    jsonData:
+      tenantId: $TENANT_ID # Directory (tenant) ID
+      clientId: $CLIENT_ID # Application (tenant) ID
+      cloudName: azuremonitor
+
+    secureJsonData:
+      clientSecret: $CLIENT_SECRET
+  - name: Tempo
+    type: tempo
+    access: proxy
+    orgId: 1
+    url: http://tempo:3200
+    basicAuth: false
+    isDefault: false
+    version: 1
+    editable: true
+    apiVersion: 1
+    uid: tempo
+    jsonData:
+      httpMethod: GET
+      serviceMap:
+        datasourceUid: prometheus
+      tracesToLogs:
+        datasourceUid: "Loki"
+        mapTagNamesEnabled: true
+        tags: ["traceId"]
+        mappedTags: [{ key: "traceId", value: "tid" }]
+        spanStartTimeShift: "1h"
+        spanEndTimeShift: "1h"
+        filterByTraceID: true
+        filterBySpanID: false
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://gateway:3100
+    jsonData:
+      httpHeaderName1: "X-Scope-OrgID"
+    secureJsonData:
+      httpHeaderValue1: "tenant1"
