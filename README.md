@@ -19,4 +19,6 @@ The Grafana instance will be preconfigured with Azure Monitor, Prometheus, Loki,
 
 These data sources are appropriately configured to connect to the relevant container instances where the generated data can be viewed.
 
+Querying the `prometheus_exemplars_bucket` metric in the Prometheus data source with exemplars enabled will display metrics that should have exemplars attached to them. Please note that there may be a delay between a metric being populated and the exemplar becoming available in Azure.
+
 To stop the demo application run `./stop.sh`.
